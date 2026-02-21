@@ -7,7 +7,7 @@ use tiny_skia::Pixmap;
 use crate::clipboard;
 use crate::export;
 use crate::file_navigator::FileNavigator;
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, MAX_RENDER_SCALE};
 use crate::svg_document::SvgDocument;
 use crate::ui::canvas;
 use crate::ui::export_dialog::{self, ExportDialogResult, ExportDialogState};
@@ -53,6 +53,9 @@ pub struct SvgViewerApp {
     // Background loading
     pending_load: Option<PendingLoad>,
     last_pixels_per_point: f32,
+
+    // Cap initial zoom to MAX_RENDER_SCALE (cleared after first auto-fit)
+    cap_initial_zoom: bool,
 }
 
 impl SvgViewerApp {
@@ -74,6 +77,7 @@ impl SvgViewerApp {
             initial_file: file_path,
             pending_load: None,
             last_pixels_per_point: 0.0,
+            cap_initial_zoom: true,
         }
     }
 
@@ -91,6 +95,7 @@ impl SvgViewerApp {
                     self.viewport.reset();
                     self.document = Some(doc);
                     self.render_dirty = true;
+                    self.cap_initial_zoom = true;
                 }
                 Err(e) => {
                     self.error_message = Some(format!("Error: {}", e));
@@ -140,11 +145,11 @@ impl SvgViewerApp {
                 let mut viewport = Viewport::default();
                 if area_w > 0.0 && area_h > 0.0 {
                     viewport.fit_to_area(doc.width, doc.height, area_w, area_h);
+                    // Cap initial zoom so small SVGs don't get blown up beyond 4×
+                    viewport.zoom = viewport.zoom.min(MAX_RENDER_SCALE);
                 }
                 let pixmap = Renderer::render_to_pixmap(&doc, &viewport, area_w, area_h, ppp)
                     .map_err(|e| format!("{e}"))?;
-                // Compute intended logical display size (pixmap may be smaller
-                // due to MAX_RENDER_SCALE cap).
                 let displayed_w = doc.width * viewport.zoom;
                 let displayed_h = doc.height * viewport.zoom;
                 let logical_display_w = displayed_w.min(area_w);
@@ -261,6 +266,7 @@ impl SvgViewerApp {
                 let (w, h) = self.last_area_size;
                 self.viewport.fit_to_area(doc.width, doc.height, w, h);
             }
+            self.cap_initial_zoom = true;
             self.render_dirty = true;
         }
     }
@@ -377,12 +383,18 @@ impl eframe::App for SvgViewerApp {
         // Bottom status bar
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             let position = self.navigator.position_display();
+            let render_size = if self.renderer.rendered_width > 0 {
+                Some((self.renderer.rendered_width, self.renderer.rendered_height))
+            } else {
+                None
+            };
             status_bar::draw_status_bar(
                 ui,
                 self.document.as_ref(),
                 &self.viewport,
                 &position,
                 self.error_message.as_deref(),
+                render_size,
             );
             if self.error_message.is_none() {
                 if let Some(ref msg) = self.status_message {
@@ -416,6 +428,12 @@ impl eframe::App for SvgViewerApp {
                     if self.viewport.fit_mode == crate::viewport::FitMode::Fit {
                         self.viewport
                             .fit_to_area(doc.width, doc.height, area.x, area.y);
+                        // Cap initial zoom so small SVGs don't get blown up beyond 4×
+                        if self.cap_initial_zoom {
+                            self.viewport.zoom =
+                                self.viewport.zoom.min(MAX_RENDER_SCALE);
+                            self.cap_initial_zoom = false;
+                        }
                     }
                 }
             }

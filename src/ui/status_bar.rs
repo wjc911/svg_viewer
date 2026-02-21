@@ -9,6 +9,7 @@ pub fn draw_status_bar(
     viewport: &Viewport,
     position_display: &str,
     error_msg: Option<&str>,
+    render_size: Option<(u32, u32)>,
 ) {
     ui.horizontal(|ui| {
         if let Some(err) = error_msg {
@@ -20,6 +21,10 @@ pub fn draw_status_bar(
             ui.label(doc.filename());
             ui.separator();
             ui.label(format!("{}x{}", doc.width as u32, doc.height as u32));
+            if let Some((rw, rh)) = render_size {
+                ui.separator();
+                ui.label(format!("Render: {}x{}", rw, rh));
+            }
             ui.separator();
             ui.label(format!("Zoom: {:.0}%", viewport.zoom_percent()));
             if !position_display.is_empty() {

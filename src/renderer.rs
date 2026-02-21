@@ -10,7 +10,7 @@ const MAX_RENDER_DIM: u32 = 4096;
 /// Prevents filter-heavy SVGs from being rasterized at huge resolutions
 /// (e.g. a 100x100 SVG rendered at 1620x1620 makes feMorphology take 1.7s).
 /// GPU bilinear scaling handles the rest with no visible quality loss.
-const MAX_RENDER_SCALE: f32 = 4.0;
+pub const MAX_RENDER_SCALE: f32 = 4.0;
 
 pub struct Renderer {
     pub texture: Option<TextureHandle>,
