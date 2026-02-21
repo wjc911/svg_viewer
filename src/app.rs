@@ -24,7 +24,8 @@ struct LoadedFile {
     doc: SvgDocument,
     pixmap: Pixmap,
     viewport: Viewport,
-    pixels_per_point: f32,
+    logical_display_w: f32,
+    logical_display_h: f32,
 }
 
 pub struct SvgViewerApp {
@@ -142,11 +143,18 @@ impl SvgViewerApp {
                 }
                 let pixmap = Renderer::render_to_pixmap(&doc, &viewport, area_w, area_h, ppp)
                     .map_err(|e| format!("{e}"))?;
+                // Compute intended logical display size (pixmap may be smaller
+                // due to MAX_RENDER_SCALE cap).
+                let displayed_w = doc.width * viewport.zoom;
+                let displayed_h = doc.height * viewport.zoom;
+                let logical_display_w = displayed_w.min(area_w);
+                let logical_display_h = displayed_h.min(area_h);
                 Ok(LoadedFile {
                     doc,
                     pixmap,
                     viewport,
-                    pixels_per_point: ppp,
+                    logical_display_w,
+                    logical_display_h,
                 })
             })();
             let _ = tx.send(result);
@@ -163,7 +171,8 @@ impl SvgViewerApp {
                         ctx,
                         &loaded.pixmap,
                         loaded.viewport.zoom,
-                        loaded.pixels_per_point,
+                        loaded.logical_display_w,
+                        loaded.logical_display_h,
                     );
                     self.viewport = loaded.viewport;
                     self.document = Some(loaded.doc);
@@ -359,9 +368,10 @@ impl eframe::App for SvgViewerApp {
         // Top toolbar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             let tb_action = toolbar::draw_toolbar(ui, has_file);
-            let center = egui::Vec2::new(self.last_area_size.0 / 2.0, self.last_area_size.1 / 2.0);
-            self.handle_action(tb_action, center);
-            self.handle_action(kb_action, center);
+            // Keyboard/toolbar zoom should zoom centered on the canvas (Vec2::ZERO),
+            // not offset by half the area size (which would shift toward top-left).
+            self.handle_action(tb_action, egui::Vec2::ZERO);
+            self.handle_action(kb_action, egui::Vec2::ZERO);
         });
 
         // Bottom status bar

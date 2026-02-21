@@ -116,8 +116,19 @@ impl Renderer {
 
         self.rendered_width = width as u32;
         self.rendered_height = height as u32;
-        self.logical_display_w = width as f32 / pixels_per_point;
-        self.logical_display_h = height as f32 / pixels_per_point;
+
+        // Compute intended logical display size (may be larger than pixmap due to
+        // MAX_RENDER_SCALE cap — GPU bilinear scaling bridges the gap).
+        let (effective_svg_w, effective_svg_h) =
+            if (viewport.rotation_deg % 180.0).abs() > 45.0 {
+                (doc.height, doc.width)
+            } else {
+                (doc.width, doc.height)
+            };
+        let displayed_w = effective_svg_w * viewport.zoom;
+        let displayed_h = effective_svg_h * viewport.zoom;
+        self.logical_display_w = displayed_w.min(area_width);
+        self.logical_display_h = displayed_h.min(area_height);
         self.rendered_zoom = viewport.zoom;
 
         Ok(())
@@ -129,7 +140,8 @@ impl Renderer {
         ctx: &egui::Context,
         pixmap: &Pixmap,
         viewport_zoom: f32,
-        pixels_per_point: f32,
+        logical_display_w: f32,
+        logical_display_h: f32,
     ) {
         let width = pixmap.width() as usize;
         let height = pixmap.height() as usize;
@@ -151,8 +163,8 @@ impl Renderer {
 
         self.rendered_width = width as u32;
         self.rendered_height = height as u32;
-        self.logical_display_w = width as f32 / pixels_per_point;
-        self.logical_display_h = height as f32 / pixels_per_point;
+        self.logical_display_w = logical_display_w;
+        self.logical_display_h = logical_display_h;
         self.rendered_zoom = viewport_zoom;
     }
 
