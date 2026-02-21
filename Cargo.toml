@@ -1,6 +1,6 @@
 [package]
 name = "svg-viewer"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A fast, cross-platform SVG desktop viewer"
 license = "MIT"
