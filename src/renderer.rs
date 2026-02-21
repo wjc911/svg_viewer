@@ -6,6 +6,11 @@ use crate::svg_document::SvgDocument;
 use crate::viewport::Viewport;
 
 const MAX_RENDER_DIM: u32 = 4096;
+/// Cap render resolution to this many times the SVG's native size.
+/// Prevents filter-heavy SVGs from being rasterized at huge resolutions
+/// (e.g. a 100x100 SVG rendered at 1620x1620 makes feMorphology take 1.7s).
+/// GPU bilinear scaling handles the rest with no visible quality loss.
+const MAX_RENDER_SCALE: f32 = 4.0;
 
 pub struct Renderer {
     pub texture: Option<TextureHandle>,
@@ -62,9 +67,12 @@ impl Renderer {
         let render_w = (capped_w * pixels_per_point).round() as u32;
         let render_h = (capped_h * pixels_per_point).round() as u32;
 
-        // Clamp to safe maximum
-        let render_w = render_w.clamp(1, MAX_RENDER_DIM);
-        let render_h = render_h.clamp(1, MAX_RENDER_DIM);
+        // Cap to MAX_RENDER_SCALE × native size so filter-heavy SVGs stay fast.
+        // GPU bilinear scaling handles further magnification.
+        let max_w = (svg_w * MAX_RENDER_SCALE).round() as u32;
+        let max_h = (svg_h * MAX_RENDER_SCALE).round() as u32;
+        let render_w = render_w.clamp(1, max_w.min(MAX_RENDER_DIM));
+        let render_h = render_h.clamp(1, max_h.min(MAX_RENDER_DIM));
 
         let mut pixmap = Pixmap::new(render_w, render_h)
             .ok_or_else(|| SvgError::Render("Failed to create pixmap".into()))?;
@@ -113,6 +121,39 @@ impl Renderer {
         self.rendered_zoom = viewport.zoom;
 
         Ok(())
+    }
+
+    /// Upload a pre-rendered pixmap as a GPU texture (for background-loaded results).
+    pub fn upload_pixmap(
+        &mut self,
+        ctx: &egui::Context,
+        pixmap: &Pixmap,
+        viewport_zoom: f32,
+        pixels_per_point: f32,
+    ) {
+        let width = pixmap.width() as usize;
+        let height = pixmap.height() as usize;
+
+        let image = ColorImage::from_rgba_premultiplied([width, height], pixmap.data());
+
+        let options = TextureOptions {
+            magnification: egui::TextureFilter::Linear,
+            minification: egui::TextureFilter::Linear,
+            ..Default::default()
+        };
+
+        match &mut self.texture {
+            Some(handle) => handle.set(image, options),
+            None => {
+                self.texture = Some(ctx.load_texture("svg_render", image, options));
+            }
+        }
+
+        self.rendered_width = width as u32;
+        self.rendered_height = height as u32;
+        self.logical_display_w = width as f32 / pixels_per_point;
+        self.logical_display_h = height as f32 / pixels_per_point;
+        self.rendered_zoom = viewport_zoom;
     }
 
     /// Render an SVG at a specific resolution for export (no viewport transforms).

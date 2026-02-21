@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::Instant;
+
+use tiny_skia::Pixmap;
 
 use crate::clipboard;
 use crate::export;
@@ -12,6 +15,17 @@ use crate::ui::shortcuts;
 use crate::ui::status_bar;
 use crate::ui::toolbar::{self, ToolbarAction};
 use crate::viewport::Viewport;
+
+struct PendingLoad {
+    receiver: mpsc::Receiver<Result<LoadedFile, String>>,
+}
+
+struct LoadedFile {
+    doc: SvgDocument,
+    pixmap: Pixmap,
+    viewport: Viewport,
+    pixels_per_point: f32,
+}
 
 pub struct SvgViewerApp {
     document: Option<SvgDocument>,
@@ -34,6 +48,10 @@ pub struct SvgViewerApp {
 
     // Initial file to load
     initial_file: Option<PathBuf>,
+
+    // Background loading
+    pending_load: Option<PendingLoad>,
+    last_pixels_per_point: f32,
 }
 
 impl SvgViewerApp {
@@ -53,23 +71,30 @@ impl SvgViewerApp {
             zoom_idle_since: None,
             pending_rerender: false,
             initial_file: file_path,
+            pending_load: None,
+            last_pixels_per_point: 0.0,
         }
     }
 
     fn load_file(&mut self, path: &Path) {
         self.error_message = None;
         self.status_message = None;
+        self.navigator.scan_directory(path);
 
-        match SvgDocument::load(path) {
-            Ok(doc) => {
-                self.navigator.scan_directory(path);
-                self.viewport.reset();
-                self.document = Some(doc);
-                self.render_dirty = true;
-            }
-            Err(e) => {
-                self.error_message = Some(format!("Error: {}", e));
-                log::error!("Failed to load {}: {}", path.display(), e);
+        if self.last_pixels_per_point > 0.0 && self.last_area_size.0 > 0.0 {
+            self.start_background_load(path);
+        } else {
+            // First frame: area size unknown, load synchronously
+            match SvgDocument::load(path) {
+                Ok(doc) => {
+                    self.viewport.reset();
+                    self.document = Some(doc);
+                    self.render_dirty = true;
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Error: {}", e));
+                    log::error!("Failed to load {}: {}", path.display(), e);
+                }
             }
         }
     }
@@ -99,14 +124,64 @@ impl SvgViewerApp {
 
     fn load_file_keep_navigator(&mut self, path: &Path) {
         self.error_message = None;
-        match SvgDocument::load(path) {
-            Ok(doc) => {
-                self.viewport.reset();
-                self.document = Some(doc);
-                self.render_dirty = true;
-            }
-            Err(e) => {
-                self.error_message = Some(format!("Error: {}", e));
+        self.start_background_load(path);
+    }
+
+    fn start_background_load(&mut self, path: &Path) {
+        let path = path.to_path_buf();
+        let (area_w, area_h) = self.last_area_size;
+        let ppp = self.last_pixels_per_point;
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let result = (|| -> Result<LoadedFile, String> {
+                let doc = SvgDocument::load(&path).map_err(|e| format!("{e}"))?;
+                let mut viewport = Viewport::default();
+                if area_w > 0.0 && area_h > 0.0 {
+                    viewport.fit_to_area(doc.width, doc.height, area_w, area_h);
+                }
+                let pixmap = Renderer::render_to_pixmap(&doc, &viewport, area_w, area_h, ppp)
+                    .map_err(|e| format!("{e}"))?;
+                Ok(LoadedFile {
+                    doc,
+                    pixmap,
+                    viewport,
+                    pixels_per_point: ppp,
+                })
+            })();
+            let _ = tx.send(result);
+        });
+
+        self.pending_load = Some(PendingLoad { receiver: rx });
+    }
+
+    fn poll_pending_load(&mut self, ctx: &egui::Context) {
+        if let Some(pending) = self.pending_load.take() {
+            match pending.receiver.try_recv() {
+                Ok(Ok(loaded)) => {
+                    self.renderer.upload_pixmap(
+                        ctx,
+                        &loaded.pixmap,
+                        loaded.viewport.zoom,
+                        loaded.pixels_per_point,
+                    );
+                    self.viewport = loaded.viewport;
+                    self.document = Some(loaded.doc);
+                    self.render_dirty = false;
+                    self.pending_rerender = false;
+                }
+                Ok(Err(msg)) => {
+                    self.error_message = Some(format!("Error: {msg}"));
+                    log::error!("Background load failed: {msg}");
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    // Still loading, put it back and keep polling
+                    self.pending_load = Some(pending);
+                    ctx.request_repaint();
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.error_message = Some("Loading failed unexpectedly".into());
+                }
             }
         }
     }
@@ -245,10 +320,15 @@ impl SvgViewerApp {
 
 impl eframe::App for SvgViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.last_pixels_per_point = ctx.pixels_per_point();
+
         // Load initial file on first frame
         if let Some(path) = self.initial_file.take() {
             self.load_file(&path);
         }
+
+        // Poll for completed background loads
+        self.poll_pending_load(ctx);
 
         // Apply theme
         if self.dark_mode {
