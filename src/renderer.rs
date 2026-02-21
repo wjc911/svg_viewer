@@ -5,7 +5,7 @@ use crate::error::{Result, SvgError};
 use crate::svg_document::SvgDocument;
 use crate::viewport::Viewport;
 
-const MAX_RENDER_DIM: u32 = 8192;
+const MAX_RENDER_DIM: u32 = 4096;
 
 pub struct Renderer {
     pub texture: Option<TextureHandle>,
@@ -37,34 +37,33 @@ impl Renderer {
             return Err(SvgError::Render("SVG has zero dimensions".into()));
         }
 
-        // Calculate render size based on zoom and display scaling
-        let render_w = (area_width * viewport.zoom * pixels_per_point).round() as u32;
-        let render_h = (area_height * viewport.zoom * pixels_per_point).round() as u32;
-
-        // Clamp to max render dimensions
-        let render_w = render_w.clamp(1, MAX_RENDER_DIM);
-        let render_h = render_h.clamp(1, MAX_RENDER_DIM);
-
-        // Calculate the actual rendered size maintaining aspect ratio
         let (effective_svg_w, effective_svg_h) = if (viewport.rotation_deg % 180.0).abs() > 45.0 {
             (svg_h, svg_w)
         } else {
             (svg_w, svg_h)
         };
 
-        let scale_x = render_w as f32 / effective_svg_w;
-        let scale_y = render_h as f32 / effective_svg_h;
-        let scale = scale_x.min(scale_y);
+        // Calculate the displayed size of the SVG on screen (in logical pixels)
+        // zoom represents how many screen pixels per SVG unit
+        let displayed_w = effective_svg_w * viewport.zoom;
+        let displayed_h = effective_svg_h * viewport.zoom;
 
-        let final_w = (effective_svg_w * scale).round() as u32;
-        let final_h = (effective_svg_h * scale).round() as u32;
-        let final_w = final_w.clamp(1, MAX_RENDER_DIM);
-        let final_h = final_h.clamp(1, MAX_RENDER_DIM);
+        // Cap to the available area so we don't render more than what's visible
+        let capped_w = displayed_w.min(area_width);
+        let capped_h = displayed_h.min(area_height);
 
-        let mut pixmap = Pixmap::new(final_w, final_h)
+        // Convert to physical pixels
+        let render_w = (capped_w * pixels_per_point).round() as u32;
+        let render_h = (capped_h * pixels_per_point).round() as u32;
+
+        // Clamp to safe maximum
+        let render_w = render_w.clamp(1, MAX_RENDER_DIM);
+        let render_h = render_h.clamp(1, MAX_RENDER_DIM);
+
+        let mut pixmap = Pixmap::new(render_w, render_h)
             .ok_or_else(|| SvgError::Render("Failed to create pixmap".into()))?;
 
-        let transform = viewport.build_transform(svg_w, svg_h, final_w as f32, final_h as f32);
+        let transform = viewport.build_transform(svg_w, svg_h, render_w as f32, render_h as f32);
         resvg::render(&doc.tree, transform, &mut pixmap.as_mut());
 
         Ok(pixmap)
