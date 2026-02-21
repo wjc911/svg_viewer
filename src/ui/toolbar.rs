@@ -1,5 +1,6 @@
 use egui::Ui;
 
+#[derive(Default)]
 pub struct ToolbarAction {
     pub open_file: bool,
     pub prev_file: bool,
@@ -17,29 +18,6 @@ pub struct ToolbarAction {
     pub toggle_bg: bool,
     pub toggle_theme: bool,
     pub reset_view: bool,
-}
-
-impl Default for ToolbarAction {
-    fn default() -> Self {
-        Self {
-            open_file: false,
-            prev_file: false,
-            next_file: false,
-            fit_to_window: false,
-            actual_size: false,
-            zoom_in: false,
-            zoom_out: false,
-            rotate_cw: false,
-            rotate_ccw: false,
-            mirror_h: false,
-            mirror_v: false,
-            export: false,
-            copy_clipboard: false,
-            toggle_bg: false,
-            toggle_theme: false,
-            reset_view: false,
-        }
-    }
 }
 
 pub fn draw_toolbar(ui: &mut Ui, has_file: bool) -> ToolbarAction {
