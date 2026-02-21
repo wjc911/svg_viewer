@@ -11,6 +11,9 @@ pub struct Renderer {
     pub texture: Option<TextureHandle>,
     pub rendered_width: u32,
     pub rendered_height: u32,
+    pub rendered_zoom: f32,
+    pub logical_display_w: f32,
+    pub logical_display_h: f32,
 }
 
 impl Renderer {
@@ -19,6 +22,9 @@ impl Renderer {
             texture: None,
             rendered_width: 0,
             rendered_height: 0,
+            rendered_zoom: 0.0,
+            logical_display_w: 0.0,
+            logical_display_h: 0.0,
         }
     }
 
@@ -102,6 +108,9 @@ impl Renderer {
 
         self.rendered_width = width as u32;
         self.rendered_height = height as u32;
+        self.logical_display_w = width as f32 / pixels_per_point;
+        self.logical_display_h = height as f32 / pixels_per_point;
+        self.rendered_zoom = viewport.zoom;
 
         Ok(())
     }

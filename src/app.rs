@@ -257,6 +257,9 @@ impl eframe::App for SvgViewerApp {
             ctx.set_visuals(egui::Visuals::light());
         }
 
+        // Disable egui's built-in keyboard zoom (Ctrl+/-) so it doesn't scale the whole UI
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
+
         // Handle keyboard shortcuts
         let has_file = self.document.is_some();
         let kb_action = shortcuts::handle_shortcuts(ctx, has_file);
@@ -346,12 +349,24 @@ impl eframe::App for SvgViewerApp {
                 egui::Color32::from_rgb(240, 240, 240)
             };
 
+            let display_size = egui::Vec2::new(
+                self.renderer.logical_display_w,
+                self.renderer.logical_display_h,
+            );
+            let zoom_ratio = if self.renderer.rendered_zoom > 0.0 {
+                self.viewport.zoom / self.renderer.rendered_zoom
+            } else {
+                1.0
+            };
+
             let (response, rect) = canvas::draw_canvas(
                 ui,
                 self.renderer.texture.as_ref(),
                 self.viewport.pan,
                 self.show_checkerboard,
                 bg_color,
+                display_size,
+                zoom_ratio,
             );
 
             // Handle drag to pan
@@ -359,19 +374,7 @@ impl eframe::App for SvgViewerApp {
                 self.viewport.pan_by(response.drag_delta());
             }
 
-            // Handle scroll to zoom
-            let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
-            if scroll_delta != 0.0 && response.hovered() {
-                let hover_pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or(rect.center()));
-                let cursor_vec = hover_pos - rect.center();
-
-                let factor = if scroll_delta > 0.0 { 1.1 } else { 0.9 };
-                self.viewport.zoom_by(factor, cursor_vec);
-                self.schedule_rerender();
-                ctx.request_repaint();
-            }
-
-            // Handle pinch-to-zoom
+            // Handle pinch-to-zoom (check first to avoid double-processing with scroll)
             let zoom_delta = ctx.input(|i| i.zoom_delta());
             if zoom_delta != 1.0 && response.hovered() {
                 let hover_pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or(rect.center()));
@@ -380,6 +383,20 @@ impl eframe::App for SvgViewerApp {
                 self.viewport.zoom_by(zoom_delta, cursor_vec);
                 self.schedule_rerender();
                 ctx.request_repaint();
+            }
+
+            // Handle scroll to zoom (skip when pinch gesture is active)
+            if zoom_delta == 1.0 {
+                let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
+                if scroll_delta != 0.0 && response.hovered() {
+                    let hover_pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or(rect.center()));
+                    let cursor_vec = hover_pos - rect.center();
+
+                    let factor = if scroll_delta > 0.0 { 1.1 } else { 0.9 };
+                    self.viewport.zoom_by(factor, cursor_vec);
+                    self.schedule_rerender();
+                    ctx.request_repaint();
+                }
             }
         });
 

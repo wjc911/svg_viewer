@@ -59,19 +59,19 @@ jobs:
         if: matrix.archive == 'tar.gz'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../svg-viewer-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
+          tar czf ../../../svg-viewer-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
 
       - name: Package (zip)
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.artifact }}" -DestinationPath "svg-viewer-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.artifact }}" -DestinationPath "svg-viewer-${{ github.ref_name }}-${{ matrix.target }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: svg-viewer-${{ matrix.target }}
-          path: svg-viewer-${{ matrix.target }}.${{ matrix.archive }}
+          name: svg-viewer-${{ github.ref_name }}-${{ matrix.target }}
+          path: svg-viewer-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
 
   release:
     name: Create Release

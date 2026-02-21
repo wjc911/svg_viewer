@@ -10,6 +10,8 @@ pub fn draw_canvas(
     pan: Vec2,
     show_checkerboard: bool,
     bg_color: Color32,
+    display_size: Vec2,
+    zoom_ratio: f32,
 ) -> (egui::Response, Rect) {
     let available = ui.available_size();
     let (response, mut painter) = ui.allocate_painter(available, Sense::click_and_drag());
@@ -24,9 +26,9 @@ pub fn draw_canvas(
 
     // Draw the SVG texture
     if let Some(tex) = texture {
-        let tex_size = tex.size_vec2();
+        let img_size = display_size * zoom_ratio;
         let center = rect.center().to_vec2() + pan;
-        let img_rect = Rect::from_center_size(center.to_pos2(), tex_size);
+        let img_rect = Rect::from_center_size(center.to_pos2(), img_size);
 
         // Clip to canvas area
         painter.set_clip_rect(rect);
